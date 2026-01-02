@@ -17,6 +17,7 @@ export default defineConfig({
   build: {
     outDir: ".vite/renderer/main_window",
     rollupOptions: {
+      external: ["better-sqlite3"],
       input: {
         main_window: resolve(__dirname, "index.html"),
       },

@@ -1,0 +1,2033 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.eslintrc.json
+.gitignore
+forge.config.ts
+forge.env.d.ts
+index.html
+package.json
+postcss.config.js
+postcss.config.mjs
+src/App.tsx
+src/index.css
+src/main.ts
+src/main/auth.ts
+src/main/database.ts
+src/main/README.md
+src/main/schema.sql
+src/main/types.ts
+src/preload.ts
+src/renderer.tsx
+tailwind.config.js
+tsconfig.json
+vite.main.config.ts
+vite.main.config.ts.timestamp-1766583945942-7a3dd1c3001fb.mjs
+vite.main.config.ts.timestamp-1766585091920-c2bcd4af97a2a.mjs
+vite.main.config.ts.timestamp-1766585486022-c5e7f1170a109.mjs
+vite.main.config.ts.timestamp-1766585612035-3245796d8002f.mjs
+vite.preload.config.ts
+vite.preload.config.ts.timestamp-1766583945968-b289c9c6f54e3.mjs
+vite.preload.config.ts.timestamp-1766585486025-8b159be5f3602.mjs
+vite.renderer.config.ts
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="postcss.config.js">
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+</file>
+
+<file path="src/main/auth.ts">
+import { ipcMain } from "electron";
+import db from "./database";
+import bcrypt from "bcryptjs";
+
+// Constants
+const LAUTECH_EMAIL_DOMAIN = "@lautech.edu.ng";
+const MIN_PASSWORD_LENGTH = 8;
+
+
+const isLautechEmail = (email: string): boolean => {
+  return email.toLowerCase().endsWith(LAUTECH_EMAIL_DOMAIN);
+};
+
+const validatePassword = (
+  password: string
+): { valid: boolean; message: string } => {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    return {
+      valid: false,
+      message: `Password must be at least ${MIN_PASSWORD_LENGTH} characters long`,
+    };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return {
+      valid: false,
+      message: "Password must contain at least one uppercase letter",
+    };
+  }
+  if (!/[a-z]/.test(password)) {
+    return {
+      valid: false,
+      message: "Password must contain at least one lowercase letter",
+    };
+  }
+  if (!/[0-9]/.test(password)) {
+    return {
+      valid: false,
+      message: "Password must contain at least one number",
+    };
+  }
+  return { valid: true, message: "Password is valid" };
+};
+
+export const setupAdminHandlers = () => {
+  ipcMain.handle(
+    "admin:login",
+    async (event, email: string, password: string) => {
+      try {
+        // Validate input
+        if (!email || !password) {
+          throw new Error("Email and password are required");
+        }
+
+        // Validate email domain
+        if (!isLautechEmail(email)) {
+          throw new Error(
+            "Only LAUTECH email addresses (@lautech.edu.ng) are allowed"
+          );
+        }
+
+        const user = db
+          .prepare("SELECT * FROM users WHERE email = ?")
+          .get(email) as
+          | {
+              id: number;
+              email: string;
+              password_hash: string;
+              role: string;
+            }
+          | undefined;
+
+        if (!user) {
+          throw new Error("Invalid email or password");
+        }
+
+        const isPasswordValid = bcrypt.compareSync(
+          password,
+          user.password_hash
+        );
+
+        if (!isPasswordValid) {
+          throw new Error("Invalid email or password");
+        }
+
+        // Update last login timestamp
+        db.prepare(
+          "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?"
+        ).run(user.id);
+
+        return {
+          success: true,
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          message: "Login successful",
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: error.message,
+        };
+      }
+    }
+  );
+
+  /**
+   * Create Admin Handler
+   * Only Super Admin can create new admin accounts
+   * Admin email must be @lautech.edu.ng
+   */
+  ipcMain.handle(
+    "auth:create-admin",
+    async (
+      event,
+      email: string,
+      password: string,
+      createdByAdminId?: number
+    ) => {
+      try {
+        // Validate input
+        if (!email || !password) {
+          throw new Error("Email and password are required");
+        }
+
+        // Validate email domain
+        if (!isLautechEmail(email)) {
+          throw new Error(
+            "Only LAUTECH email addresses (@lautech.edu.ng) are allowed"
+          );
+        }
+
+        // Check if user already exists
+        const existingUser = db
+          .prepare("SELECT * FROM users WHERE email = ?")
+          .get(email);
+
+        if (existingUser) {
+          throw new Error("User with this email already exists");
+        }
+
+        // Validate password strength
+        const passwordValidation = validatePassword(password);
+        if (!passwordValidation.valid) {
+          throw new Error(passwordValidation.message);
+        }
+
+        // Hash password
+        const salt = bcrypt.genSaltSync(10);
+        const hash = bcrypt.hashSync(password, salt);
+
+        // Insert new admin user
+        const result = db
+          .prepare(
+            `
+            INSERT INTO users (email, password_hash, role, created_at) 
+            VALUES (@email, @hash, 'admin', CURRENT_TIMESTAMP)
+          `
+          )
+          .run({ email, hash });
+
+        return {
+          success: true,
+          id: result.lastInsertRowid,
+          message: "Admin user created successfully",
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: error.message,
+        };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    "auth:create-super-admin",
+    async (event, email: string, password: string, createdByUserId: number) => {
+      try {
+        // Validate input
+        if (!email || !password) {
+          throw new Error("Email and password are required");
+        }
+
+        // Verify that the user creating this super admin is themselves a super admin
+        const creator = db
+          .prepare("SELECT * FROM users WHERE id = ?")
+          .get(createdByUserId) as { role: string } | undefined;
+
+        if (!creator) {
+          throw new Error("Creator user not found");
+        }
+
+        if (creator.role !== "super_admin") {
+          throw new Error("Only super admins can create other super admins");
+        }
+
+        // Validate email domain
+        if (!isLautechEmail(email)) {
+          throw new Error(
+            "Only LAUTECH email addresses (@lautech.edu.ng) are allowed"
+          );
+        }
+
+        // Check if user already exists
+        const existingUser = db
+          .prepare("SELECT * FROM users WHERE email = ?")
+          .get(email);
+
+        if (existingUser) {
+          throw new Error("User with this email already exists");
+        }
+
+        // Validate password strength
+        const passwordValidation = validatePassword(password);
+        if (!passwordValidation.valid) {
+          throw new Error(passwordValidation.message);
+        }
+
+        // Hash password
+        const salt = bcrypt.genSaltSync(10);
+        const hash = bcrypt.hashSync(password, salt);
+
+        // Insert new super admin user
+        const result = db
+          .prepare(
+            `
+            INSERT INTO users (email, password_hash, role, created_at) 
+            VALUES (@email, @hash, 'super_admin', CURRENT_TIMESTAMP)
+          `
+          )
+          .run({ email, hash });
+
+        return {
+          success: true,
+          id: result.lastInsertRowid,
+          message: "Super admin user created successfully",
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: error.message,
+        };
+      }
+    }
+  );
+
+  /**
+   * Change Password Handler
+   * Allows users to change their password
+   */
+  ipcMain.handle(
+    "auth:change-password",
+    async (event, userId: number, oldPassword: string, newPassword: string) => {
+      try {
+        if (!oldPassword || !newPassword) {
+          throw new Error("Old password and new password are required");
+        }
+
+        const user = db
+          .prepare("SELECT * FROM users WHERE id = ?")
+          .get(userId) as { password_hash: string } | undefined;
+
+        if (!user) {
+          throw new Error("User not found");
+        }
+
+        // Verify old password
+        const isOldPasswordValid = bcrypt.compareSync(
+          oldPassword,
+          user.password_hash
+        );
+        if (!isOldPasswordValid) {
+          throw new Error("Old password is incorrect");
+        }
+
+        // Validate new password strength
+        const passwordValidation = validatePassword(newPassword);
+        if (!passwordValidation.valid) {
+          throw new Error(passwordValidation.message);
+        }
+
+        // Hash new password
+        const salt = bcrypt.genSaltSync(10);
+        const newHash = bcrypt.hashSync(newPassword, salt);
+
+        // Update password
+        db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(
+          newHash,
+          userId
+        );
+
+        return {
+          success: true,
+          message: "Password changed successfully",
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: error.message,
+        };
+      }
+    }
+  );
+};
+</file>
+
+<file path="src/main/database.ts">
+import Database from "better-sqlite3";
+import bcrypt from "bcryptjs";
+import path from "path";
+import { app } from "electron";
+
+// Initialize DB
+const dbPath = path.join(app.getPath("userData"), "database.sqlite");
+const db = new Database(dbPath);
+
+export const initDB = () => {
+  // Create Table
+  db.prepare(
+    `
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT CHECK(role IN ('super_admin', 'admin')) NOT NULL DEFAULT 'admin',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `
+  ).run();
+
+  // Create Default Super Admin if none exists
+  const userCount = db.prepare("SELECT count(*) as count FROM users").get() as {
+    count: number;
+  };
+
+  if (userCount.count === 0) {
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync("admin123", salt); // Default password
+
+    db.prepare(
+      `
+      INSERT INTO users (email, password_hash, role) 
+      VALUES (@email, @hash, 'super_admin')
+    `
+    ).run({ email: "admin@lautech.edu.ng", hash });
+
+    console.log("Default Super Admin created: admin@lautech.edu.ng / admin123");
+  }
+};
+
+export default db;
+</file>
+
+<file path="src/main/README.md">
+# Database Schema Documentation
+
+## Overview
+
+This document describes the SQLite database schema for the Result Management System. The schema is organized into 10 main categories covering all functional requirements.
+
+## Database Tables
+
+### 1. Account Management
+
+#### `roles`
+
+Defines user roles and their permissions.
+
+- **id**: Primary key
+- **name**: Role name (Super Administrator, Administrator, Viewer)
+- **description**: Role description
+- **created_at**: Timestamp
+
+#### `users`
+
+User accounts for system administrators.
+
+- **id**: Primary key
+- **username**: Unique username for login
+- **email**: Unique email address
+- **password_hash**: Hashed password
+- **role_id**: Foreign key to roles table
+- **full_name**: User's full name
+- **phone**: Contact number
+- **is_active**: Account status
+- **last_login**: Last login timestamp
+- **created_at/updated_at**: Timestamps
+- **created_by**: User who created this account
+
+---
+
+### 2. Organizational Structure
+
+#### `faculties`
+
+University faculties/colleges.
+
+- **id**: Primary key
+- **name**: Faculty name (unique)
+- **code**: Faculty code (unique)
+- **description**: Faculty description
+
+#### `faculty_deans`
+
+Heads of faculties.
+
+- **faculty_id**: Foreign key to faculties (one-to-one)
+- **dean_name**: Dean's full name
+- **email/phone**: Contact information
+- **start_date/end_date**: Term of office
+- **is_active**: Current status
+
+#### `departments`
+
+Departments within faculties.
+
+- **id**: Primary key
+- **name**: Department name (unique)
+- **code**: Department code (unique)
+- **faculty_id**: Foreign key to faculties
+- **description**: Department description
+
+#### `department_heads`
+
+Heads of departments.
+
+- **department_id**: Foreign key to departments (one-to-one)
+- **hod_name**: HOD's full name
+- **email/phone**: Contact information
+- **start_date/end_date**: Term of office
+- **is_active**: Current status
+
+---
+
+### 3. Academic Structure
+
+#### `academic_sessions`
+
+Academic years (e.g., 2024/2025).
+
+- **id**: Primary key
+- **session_name**: Display name
+- **start_year/end_year**: Academic year range
+- **is_active**: Currently active session
+
+#### `semesters`
+
+Semesters within academic sessions.
+
+- **session_id**: Foreign key to academic_sessions
+- **semester_number**: 1 or 2
+- **semester_name**: "First Semester", etc.
+- **start_date/end_date**: Semester dates
+- **is_active**: Currently active semester
+
+#### `student_sets`
+
+Student cohorts/classes (groups of students admitted in same year).
+
+- **id**: Primary key
+- **department_id**: Foreign key to departments
+- **admission_year**: Year of admission
+- **level**: 100, 200, 300, 400 (course level)
+- **set_name**: e.g., "CS 200L (2022 Admission)"
+- **is_active**: Currently active
+
+---
+
+### 4. Student Records
+
+#### `students`
+
+Student biodata and enrollment information.
+
+- **id**: Primary key
+- **student_id**: Unique student ID (e.g., "CS/2022/001")
+- **set_id**: Foreign key to student_sets
+- **first_name/last_name/middle_name**: Student name
+- **gender**: Student gender
+- **date_of_birth**: DOB
+- **email/phone**: Contact information
+- **address/city/state/postal_code**: Physical address
+- **nationality**: Nationality
+- **admission_date**: Date admitted
+- **status**: active, graduated, suspended, withdrawn
+- **photo_path**: Path to student photo
+
+---
+
+### 5. Curriculum Management
+
+#### `courses`
+
+Course definitions.
+
+- **id**: Primary key
+- **code**: Unique course code (e.g., "CS201")
+- **title**: Course title
+- **credit_units**: Credit units for the course
+- **semester_id**: Which semester this course is offered
+- **department_id**: Offering department
+- **is_mandatory**: Whether course is required
+
+#### `curriculum`
+
+Curriculum plan for a student set in a specific semester.
+
+- **id**: Primary key
+- **set_id**: Which student set
+- **semester_id**: Which semester
+- **created_by**: Administrator who created curriculum
+- **created_at/updated_at**: Timestamps
+
+#### `curriculum_courses`
+
+Courses included in a curriculum.
+
+- **curriculum_id**: Foreign key to curriculum
+- **course_id**: Foreign key to courses
+- Maps courses to specific curriculum instances
+
+---
+
+### 6. Results & Grades
+
+#### `grading_scale`
+
+Grading system definition (default 4.0 scale).
+
+- **grade_letter**: Letter grade (A, B, C, D, F)
+- **grade_point**: Corresponding GPA point
+- **min_score/max_score**: Score range for grade
+- Example: A = 4.0 points, 80-100 score range
+
+#### `results`
+
+Student grades for each course.
+
+- **id**: Primary key
+- **student_id**: Which student
+- **course_id**: Which course
+- **semester_id**: Which semester
+- **academic_session_id**: Which academic year
+- **raw_score**: Score obtained (0-100)
+- **grade_letter**: Computed grade (A-F)
+- **grade_point**: Computed GPA points
+- **is_exempted**: Whether student is exempted from course
+- **remarks**: Additional notes
+- **created_by**: Administrator who entered grade
+
+#### `student_gpa`
+
+Computed GPA for each student per semester.
+
+- **student_id**: Which student
+- **semester_id**: Which semester
+- **academic_session_id**: Which academic year
+- **semester_gpa**: GPA for that semester only
+- **cumulative_gpa**: Overall GPA to date
+- **total_credit_units**: Total credits taken
+- **earned_credit_units**: Credits successfully completed
+
+---
+
+### 7. Reports
+
+#### `master_mark_sheets`
+
+Log of generated mark sheets for audit trail.
+
+- **set_id**: Which student set
+- **semester_id**: Which semester
+- **course_id**: Which course
+- **file_path**: Where the report file is stored
+- **generated_by**: Administrator who generated report
+
+#### `report_logs`
+
+Log of all generated reports for audit trail.
+
+- **report_type**: "Master Mark Sheet", "Running List", etc.
+- **format**: xlsx, pdf, csv
+- **file_path**: Location of generated file
+- **status**: success, error, pending
+- **error_message**: Error details if failed
+
+---
+
+### 8. Audit & System
+
+#### `database_backups`
+
+Log of database backups.
+
+- **backup_name**: Name of backup
+- **backup_path**: Location of backup file
+- **created_at/created_by**: When and who created
+- **restored_at/restored_by**: When and who restored
+
+#### `audit_logs`
+
+Audit trail of all database modifications.
+
+- **user_id**: Which user made the change
+- **action**: INSERT, UPDATE, DELETE, etc.
+- **table_name**: Which table was modified
+- **old_values**: Previous values (JSON)
+- **new_values**: New values (JSON)
+- **timestamp**: When change occurred
+
+---
+
+## Key Relationships
+
+```
+Faculty → Department → StudentSet → Student
+                                  ↓
+                            Results (Course) → Grade
+                                  ↓
+                            Student GPA
+
+Academic Session → Semester → Courses
+                         ↓
+                    Curriculum → CurriculumCourse
+
+Faculty → FacultyDean
+Department → DepartmentHead
+Department → Courses
+
+User (Admin) creates/manages all entities
+```
+
+---
+
+## Database Constraints
+
+1. **Foreign Keys**: Enabled to maintain referential integrity
+2. **Unique Constraints**:
+   - `username`, `email` in users
+   - Faculty/Department names and codes
+   - Student ID within system
+   - Course code
+   - Combined (set_id, semester_id) for curriculum
+   - Combined (student_id, course_id, semester_id, session_id) for results
+
+3. **Not Null Constraints**: Applied to all required fields
+
+---
+
+## Performance Indexes
+
+Indexes are created on frequently queried columns:
+
+- User role lookups
+- Student set/course lookups
+- Result queries (student, course, semester, session)
+- GPA queries
+- Audit log queries
+- Department/Faculty queries
+
+---
+
+## Initial Data
+
+The schema includes default data:
+
+- **Roles**: Super Administrator, Administrator, Viewer
+- **Grading Scale**: Standard 4.0 point scale (A=4.0, B=3.0, C=2.0, D=1.0, F=0.0)
+
+---
+
+## Usage Notes
+
+1. **Database Location**: Stored in user's app data directory (userData folder)
+2. **WAL Mode**: Enabled for better concurrent access
+3. **Password Storage**: Passwords should be hashed before insertion (use bcrypt or similar)
+4. **Audit Logging**: All modifications should be logged to `audit_logs` table
+5. **Backup**: Use the DatabaseManager to create backups (stored as separate .db files)
+6. **Restore**: Can restore from backup files for recovery
+
+---
+
+## Database Initialization
+
+The database is automatically initialized when the application starts:
+
+1. Connection is established
+2. Foreign keys are enabled
+3. WAL mode is enabled
+4. Schema is created if it doesn't exist
+5. Default data is inserted
+
+No manual SQL execution is needed.
+</file>
+
+<file path="src/main/schema.sql">
+-- =====================================================
+-- Result Management System - SQLite Schema
+-- Department of Information Systems
+-- =====================================================
+
+-- =====================================================
+-- 1. ACCOUNT MANAGEMENT TABLES
+-- =====================================================
+
+-- User Roles
+-- CREATE TABLE IF NOT EXISTS roles (
+--   id INTEGER PRIMARY KEY AUTOINCREMENT,
+--   name TEXT UNIQUE NOT NULL,
+--   description TEXT,
+--   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+-- );
+
+-- Users/Administrator Accounts 
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL, -- Store hashed passwords, never plain text
+    role TEXT CHECK(role IN ('super_admin', 'admin')) NOT NULL DEFAULT 'admin',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =====================================================
+-- 2. ORGANIZATIONAL STRUCTURE TABLES
+-- =====================================================
+
+-- Faculty
+CREATE TABLE IF NOT EXISTS faculties (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Faculty Dean
+CREATE TABLE IF NOT EXISTS faculty_deans (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  faculty_id INTEGER UNIQUE NOT NULL,
+  dean_name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  start_date DATE,
+  end_date DATE,
+  is_active BOOLEAN DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (faculty_id) REFERENCES faculties(id)
+);
+
+-- Department
+CREATE TABLE IF NOT EXISTS departments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT UNIQUE NOT NULL,
+  code TEXT UNIQUE NOT NULL,
+  faculty_id INTEGER NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (faculty_id) REFERENCES faculties(id)
+);
+
+-- Department Head of Department (HOD)
+CREATE TABLE IF NOT EXISTS department_heads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER UNIQUE NOT NULL,
+  hod_name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  start_date DATE,
+  end_date DATE,
+  is_active BOOLEAN DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (department_id) REFERENCES departments(id)
+);
+
+-- =====================================================
+-- 3. ACADEMIC STRUCTURE TABLES
+-- =====================================================
+
+-- Academic Sessions/Years
+CREATE TABLE IF NOT EXISTS academic_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_name TEXT NOT NULL,
+  start_year INTEGER NOT NULL,
+  end_year INTEGER NOT NULL,
+  is_active BOOLEAN DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(start_year, end_year)
+);
+
+-- Semesters
+CREATE TABLE IF NOT EXISTS semesters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL,
+  semester_number INTEGER NOT NULL,
+  semester_name TEXT NOT NULL,
+  start_date DATE NOT NULL,
+  end_date DATE NOT NULL,
+  is_active BOOLEAN DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (session_id) REFERENCES academic_sessions(id),
+  UNIQUE(session_id, semester_number)
+);
+
+-- Student Sets/Cohorts/Programs
+CREATE TABLE IF NOT EXISTS student_sets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  department_id INTEGER NOT NULL,
+  admission_year INTEGER NOT NULL,
+  level INTEGER NOT NULL,
+  set_name TEXT NOT NULL,
+  description TEXT,
+  is_active BOOLEAN DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (department_id) REFERENCES departments(id),
+  UNIQUE(department_id, admission_year, level)
+);
+
+-- =====================================================
+-- 4. STUDENT RECORDS TABLES
+-- =====================================================
+
+-- Students
+CREATE TABLE IF NOT EXISTS students (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id TEXT UNIQUE NOT NULL,
+  set_id INTEGER NOT NULL,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  middle_name TEXT,
+  gender TEXT,
+  date_of_birth DATE,
+  email TEXT UNIQUE,
+  phone TEXT,
+  address TEXT,
+  city TEXT,
+  state TEXT,
+  postal_code TEXT,
+  nationality TEXT,
+  admission_date DATE NOT NULL,
+  status TEXT DEFAULT 'active',
+  photo_path TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER,
+  FOREIGN KEY (set_id) REFERENCES student_sets(id),
+  FOREIGN KEY (created_by) REFERENCES users(id)
+);
+
+-- =====================================================
+-- 5. CURRICULUM TABLES
+-- =====================================================
+
+-- Courses
+CREATE TABLE IF NOT EXISTS courses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  credit_units INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL,
+  department_id INTEGER NOT NULL,
+  is_mandatory BOOLEAN DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (department_id) REFERENCES departments(id)
+);
+
+-- Curriculum (Course Plan for a Set)
+CREATE TABLE IF NOT EXISTS curriculum (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  set_id INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER,
+  FOREIGN KEY (set_id) REFERENCES student_sets(id),
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  UNIQUE(set_id, semester_id)
+);
+
+-- Curriculum Courses (Courses in a specific curriculum)
+CREATE TABLE IF NOT EXISTS curriculum_courses (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  curriculum_id INTEGER NOT NULL,
+  course_id INTEGER NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (curriculum_id) REFERENCES curriculum(id),
+  FOREIGN KEY (course_id) REFERENCES courses(id),
+  UNIQUE(curriculum_id, course_id)
+);
+
+-- =====================================================
+-- 6. RESULTS/GRADES TABLES
+-- =====================================================
+
+-- Grading Scale
+CREATE TABLE IF NOT EXISTS grading_scale (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  grade_letter TEXT UNIQUE NOT NULL,
+  grade_point REAL NOT NULL,
+  min_score REAL NOT NULL,
+  max_score REAL NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Student Results/Grades
+CREATE TABLE IF NOT EXISTS results (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  course_id INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL,
+  academic_session_id INTEGER NOT NULL,
+  raw_score REAL,
+  grade_letter TEXT,
+  grade_point REAL,
+  is_exempted BOOLEAN DEFAULT 0,
+  remarks TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER,
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (course_id) REFERENCES courses(id),
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (academic_session_id) REFERENCES academic_sessions(id),
+  FOREIGN KEY (grade_letter) REFERENCES grading_scale(grade_letter),
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  UNIQUE(student_id, course_id, semester_id, academic_session_id)
+);
+
+-- Student GPA/Cumulative Results (Computed)
+CREATE TABLE IF NOT EXISTS student_gpa (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL,
+  academic_session_id INTEGER NOT NULL,
+  semester_gpa REAL,
+  cumulative_gpa REAL,
+  total_credit_units INTEGER,
+  earned_credit_units INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES students(id),
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (academic_session_id) REFERENCES academic_sessions(id),
+  UNIQUE(student_id, semester_id, academic_session_id)
+);
+
+-- =====================================================
+-- 7. REPORTS TABLES
+-- =====================================================
+
+-- Master Mark Sheet (Aggregated Results)
+CREATE TABLE IF NOT EXISTS master_mark_sheets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  set_id INTEGER NOT NULL,
+  semester_id INTEGER NOT NULL,
+  academic_session_id INTEGER NOT NULL,
+  course_id INTEGER NOT NULL,
+  generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  generated_by INTEGER,
+  file_path TEXT,
+  FOREIGN KEY (set_id) REFERENCES student_sets(id),
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (academic_session_id) REFERENCES academic_sessions(id),
+  FOREIGN KEY (course_id) REFERENCES courses(id),
+  FOREIGN KEY (generated_by) REFERENCES users(id)
+);
+
+-- Report Generation Log
+CREATE TABLE IF NOT EXISTS report_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_type TEXT NOT NULL,
+  set_id INTEGER,
+  semester_id INTEGER,
+  academic_session_id INTEGER,
+  format TEXT NOT NULL,
+  file_path TEXT,
+  generated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  generated_by INTEGER,
+  status TEXT DEFAULT 'success',
+  error_message TEXT,
+  FOREIGN KEY (set_id) REFERENCES student_sets(id),
+  FOREIGN KEY (semester_id) REFERENCES semesters(id),
+  FOREIGN KEY (academic_session_id) REFERENCES academic_sessions(id),
+  FOREIGN KEY (generated_by) REFERENCES users(id)
+);
+
+-- =====================================================
+-- 8. AUDIT & SYSTEM TABLES
+-- =====================================================
+
+-- Database Backups
+CREATE TABLE IF NOT EXISTS database_backups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  backup_name TEXT UNIQUE NOT NULL,
+  backup_path TEXT NOT NULL,
+  backup_size INTEGER,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_by INTEGER,
+  restored_at DATETIME,
+  restored_by INTEGER,
+  FOREIGN KEY (created_by) REFERENCES users(id),
+  FOREIGN KEY (restored_by) REFERENCES users(id)
+);
+
+-- Audit Log
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  action TEXT NOT NULL,
+  table_name TEXT,
+  record_id INTEGER,
+  old_values TEXT,
+  new_values TEXT,
+  ip_address TEXT,
+  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- =====================================================
+-- 9. INDEXES FOR PERFORMANCE
+-- =====================================================
+
+CREATE INDEX IF NOT EXISTS idx_users_role_id ON users(role_id);
+CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
+CREATE INDEX IF NOT EXISTS idx_students_set_id ON students(set_id);
+CREATE INDEX IF NOT EXISTS idx_students_status ON students(status);
+CREATE INDEX IF NOT EXISTS idx_results_student_id ON results(student_id);
+CREATE INDEX IF NOT EXISTS idx_results_course_id ON results(course_id);
+CREATE INDEX IF NOT EXISTS idx_results_semester_id ON results(semester_id);
+CREATE INDEX IF NOT EXISTS idx_results_session_id ON results(academic_session_id);
+CREATE INDEX IF NOT EXISTS idx_student_gpa_student_id ON student_gpa(student_id);
+CREATE INDEX IF NOT EXISTS idx_student_gpa_semester_id ON student_gpa(semester_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_departments_faculty_id ON departments(faculty_id);
+CREATE INDEX IF NOT EXISTS idx_student_sets_department_id ON student_sets(department_id);
+CREATE INDEX IF NOT EXISTS idx_courses_department_id ON courses(department_id);
+CREATE INDEX IF NOT EXISTS idx_courses_semester_id ON courses(semester_id);
+CREATE INDEX IF NOT EXISTS idx_semesters_session_id ON semesters(session_id);
+
+-- =====================================================
+-- 10. INITIAL DATA
+-- =====================================================
+
+-- Insert default roles
+INSERT INTO roles (name, description) VALUES 
+  ('Super Administrator', 'Full system access, account management'),
+  ('Administrator', 'Record management, result processing'),
+  ('Viewer', 'View-only access to records and reports')
+ON CONFLICT DO NOTHING;
+
+-- Insert default grading scale (Typical 4.0 scale)
+INSERT INTO grading_scale (grade_letter, grade_point, min_score, max_score, description) VALUES
+  ('A', 4.0, 80, 100, 'Excellent'),
+  ('B', 3.0, 70, 79, 'Good'),
+  ('C', 2.0, 60, 69, 'Satisfactory'),
+  ('D', 1.0, 50, 59, 'Pass'),
+  ('F', 0.0, 0, 49, 'Fail')
+ON CONFLICT DO NOTHING;
+</file>
+
+<file path="src/main/types.ts">
+/**
+ * Database Type Definitions
+ * Corresponds to the SQLite schema for Result Management System
+ */
+
+// =====================================================
+// Account Management Types
+// =====================================================
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string;
+  created_at: string;
+}
+
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  password_hash: string;
+  role_id: number;
+  full_name: string;
+  phone?: string;
+  is_active: boolean;
+  last_login?: string;
+  created_at: string;
+  updated_at: string;
+  created_by?: number;
+  role?: Role; // Populated when joined
+}
+
+// =====================================================
+// Organizational Structure Types
+// =====================================================
+
+export interface Faculty {
+  id: number;
+  name: string;
+  code: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FacultyDean {
+  id: number;
+  faculty_id: number;
+  dean_name: string;
+  email?: string;
+  phone?: string;
+  start_date?: string;
+  end_date?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  faculty?: Faculty; // Populated when joined
+}
+
+export interface Department {
+  id: number;
+  name: string;
+  code: string;
+  faculty_id: number;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+  faculty?: Faculty; // Populated when joined
+}
+
+export interface DepartmentHead {
+  id: number;
+  department_id: number;
+  hod_name: string;
+  email?: string;
+  phone?: string;
+  start_date?: string;
+  end_date?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  department?: Department; // Populated when joined
+}
+
+// =====================================================
+// Academic Structure Types
+// =====================================================
+
+export interface AcademicSession {
+  id: number;
+  session_name: string;
+  start_year: number;
+  end_year: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Semester {
+  id: number;
+  session_id: number;
+  semester_number: number;
+  semester_name: string;
+  start_date: string;
+  end_date: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  session?: AcademicSession; // Populated when joined
+}
+
+export interface StudentSet {
+  id: number;
+  department_id: number;
+  admission_year: number;
+  level: number;
+  set_name: string;
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  department?: Department; // Populated when joined
+}
+
+// =====================================================
+// Student Records Types
+// =====================================================
+
+export interface Student {
+  id: number;
+  student_id: string;
+  set_id: number;
+  first_name: string;
+  last_name: string;
+  middle_name?: string;
+  gender?: string;
+  date_of_birth?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  nationality?: string;
+  admission_date: string;
+  status: "active" | "graduated" | "suspended" | "withdrawn";
+  photo_path?: string;
+  created_at: string;
+  updated_at: string;
+  created_by?: number;
+  set?: StudentSet; // Populated when joined
+}
+
+// =====================================================
+// Curriculum Types
+// =====================================================
+
+export interface Course {
+  id: number;
+  code: string;
+  title: string;
+  description?: string;
+  credit_units: number;
+  semester_id: number;
+  department_id: number;
+  is_mandatory: boolean;
+  created_at: string;
+  updated_at: string;
+  semester?: Semester; // Populated when joined
+  department?: Department; // Populated when joined
+}
+
+export interface Curriculum {
+  id: number;
+  set_id: number;
+  semester_id: number;
+  created_at: string;
+  updated_at: string;
+  created_by?: number;
+  set?: StudentSet; // Populated when joined
+  semester?: Semester; // Populated when joined
+}
+
+export interface CurriculumCourse {
+  id: number;
+  curriculum_id: number;
+  course_id: number;
+  created_at: string;
+  curriculum?: Curriculum; // Populated when joined
+  course?: Course; // Populated when joined
+}
+
+// =====================================================
+// Results/Grades Types
+// =====================================================
+
+export interface GradingScale {
+  id: number;
+  grade_letter: string;
+  grade_point: number;
+  min_score: number;
+  max_score: number;
+  description?: string;
+  created_at: string;
+}
+
+export interface Result {
+  id: number;
+  student_id: number;
+  course_id: number;
+  semester_id: number;
+  academic_session_id: number;
+  raw_score?: number;
+  grade_letter?: string;
+  grade_point?: number;
+  is_exempted: boolean;
+  remarks?: string;
+  created_at: string;
+  updated_at: string;
+  created_by?: number;
+  student?: Student; // Populated when joined
+  course?: Course; // Populated when joined
+  semester?: Semester; // Populated when joined
+  session?: AcademicSession; // Populated when joined
+}
+
+export interface StudentGPA {
+  id: number;
+  student_id: number;
+  semester_id: number;
+  academic_session_id: number;
+  semester_gpa?: number;
+  cumulative_gpa?: number;
+  total_credit_units: number;
+  earned_credit_units: number;
+  created_at: string;
+  updated_at: string;
+  student?: Student; // Populated when joined
+  semester?: Semester; // Populated when joined
+  session?: AcademicSession; // Populated when joined
+}
+
+// =====================================================
+// Reports Types
+// =====================================================
+
+export interface MasterMarkSheet {
+  id: number;
+  set_id: number;
+  semester_id: number;
+  academic_session_id: number;
+  course_id: number;
+  generated_at: string;
+  generated_by?: number;
+  file_path?: string;
+  set?: StudentSet; // Populated when joined
+  semester?: Semester; // Populated when joined
+  session?: AcademicSession; // Populated when joined
+  course?: Course; // Populated when joined
+}
+
+export interface ReportLog {
+  id: number;
+  report_type: string;
+  set_id?: number;
+  semester_id?: number;
+  academic_session_id?: number;
+  format: "xlsx" | "pdf" | "csv";
+  file_path?: string;
+  generated_at: string;
+  generated_by?: number;
+  status: "success" | "error" | "pending";
+  error_message?: string;
+  set?: StudentSet; // Populated when joined
+  semester?: Semester; // Populated when joined
+  session?: AcademicSession; // Populated when joined
+}
+
+// =====================================================
+// Audit & System Types
+// =====================================================
+
+export interface DatabaseBackup {
+  id: number;
+  backup_name: string;
+  backup_path: string;
+  backup_size?: number;
+  created_at: string;
+  created_by?: number;
+  restored_at?: string;
+  restored_by?: number;
+}
+
+export interface AuditLog {
+  id: number;
+  user_id?: number;
+  action: string;
+  table_name?: string;
+  record_id?: number;
+  old_values?: string;
+  new_values?: string;
+  ip_address?: string;
+  timestamp: string;
+  user?: User; // Populated when joined
+}
+
+// =====================================================
+// Request/Response Types
+// =====================================================
+
+export interface PagedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  limit: number;
+  total_pages: number;
+}
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+}
+
+// =====================================================
+// Utility Types
+// =====================================================
+
+export type StudentStatus = "active" | "graduated" | "suspended" | "withdrawn";
+export type ReportFormat = "xlsx" | "pdf" | "csv";
+export type ReportStatus = "success" | "error" | "pending";
+</file>
+
+<file path=".eslintrc.json">
+{
+  "env": {
+    "browser": true,
+    "es6": true,
+    "node": true
+  },
+  "extends": [
+    "eslint:recommended",
+    "plugin:@typescript-eslint/eslint-recommended",
+    "plugin:@typescript-eslint/recommended",
+    "plugin:import/recommended",
+    "plugin:import/electron",
+    "plugin:import/typescript"
+  ],
+  "parser": "@typescript-eslint/parser"
+}
+</file>
+
+<file path=".gitignore">
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+.DS_Store
+
+# Directory for instrumented libs generated by jscoverage/JSCover
+lib-cov
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# node-waf configuration
+.lock-wscript
+
+# Compiled binary addons (https://nodejs.org/api/addons.html)
+build/Release
+
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# TypeScript v1 declaration files
+typings/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# Optional eslint cache
+.eslintcache
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env
+.env.test
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+
+# next.js build output
+.next
+
+# nuxt.js build output
+.nuxt
+
+# vuepress build output
+.vuepress/dist
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# Webpack
+.webpack/
+
+# Vite
+.vite/
+
+# Electron-Forge
+out/
+</file>
+
+<file path="forge.config.ts">
+import type { ForgeConfig } from "@electron-forge/shared-types";
+import { VitePlugin } from "@electron-forge/plugin-vite";
+import { FusesPlugin } from "@electron-forge/plugin-fuses";
+import { FuseV1Options, FuseVersion } from "@electron/fuses";
+
+const config: ForgeConfig = {
+  packagerConfig: {},
+  rebuildConfig: {},
+  makers: [
+    // your makers
+  ],
+  plugins: [
+    new VitePlugin({
+      build: [
+        {
+          entry: "src/main.ts",
+          config: "vite.main.config.ts",
+        },
+        {
+          entry: "src/preload.ts",
+          config: "vite.preload.config.ts",
+        },
+      ],
+      renderer: [
+        {
+          name: "main_window",
+          config: "vite.renderer.config.ts",
+        },
+      ],
+    }),
+    // new FusesPlugin({
+    //   version: FuseVersion.V1,
+    //   [FuseV1Options.RunAsNode]: false,
+    //   [FuseV1Options.EnableCookieEncryption]: true,
+    //   [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+    //   [FuseV1Options.EnableNodeCliInspectArguments]: false,
+    //   [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+    //   [FuseV1Options.OnlyLoadAppFromAsar]: true,
+    // }),
+  ],
+};
+
+export default config;
+</file>
+
+<file path="forge.env.d.ts">
+/// <reference types="@electron-forge/plugin-vite/forge-vite-env" />
+</file>
+
+<file path="index.html">
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Result Management System</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/renderer.tsx"></script>
+  </body>
+</html>
+</file>
+
+<file path="package.json">
+{
+  "type": "module",
+  "name": "result-mgt-system",
+  "productName": "result-mgt-system",
+  "version": "1.0.0",
+  "description": "My Electron application description",
+  "main": ".vite/build/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish",
+    "lint": "eslint --ext .ts,.tsx ."
+  },
+  "keywords": [],
+  "author": {
+    "name": "deltechdesigns",
+    "email": "deltechdesigns@gmail.com"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.3",
+    "@electron-forge/maker-deb": "^7.10.2",
+    "@electron-forge/maker-rpm": "^7.10.2",
+    "@electron-forge/maker-squirrel": "^7.10.2",
+    "@electron-forge/maker-zip": "^7.10.2",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.10.2",
+    "@electron-forge/plugin-fuses": "^7.10.2",
+    "@electron-forge/plugin-vite": "^7.10.2",
+    "@electron/fuses": "^1.8.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/electron-squirrel-startup": "^1.0.2",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "autoprefixer": "^10.4.23",
+    "electron": "^39.2.7",
+    "eslint": "^8.57.1",
+    "eslint-plugin-import": "^2.32.0",
+    "postcss": "^8.5.6",
+    "repomix": "^1.11.0",
+    "tailwindcss": "^3.4.19",
+    "typescript": "~4.5.4",
+    "vite": "^7.3.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.5.0",
+    "electron-squirrel-startup": "^1.0.1",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  }
+}
+</file>
+
+<file path="postcss.config.mjs">
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+};
+</file>
+
+<file path="src/App.tsx">
+import React from 'react';
+
+function App() {
+  return (
+    <div className="min-h-screen bg-blue-100 flex items-center justify-center">
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">
+          Result Management System
+        </h1>
+        <p className="text-gray-600">Welcome to your Electron + React + TypeScript app!</p>
+      </div>
+    </div>
+  );
+}
+
+export default App;
+</file>
+
+<file path="src/index.css">
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+</file>
+
+<file path="src/main.ts">
+import { app, BrowserWindow } from "electron";
+import path from "node:path";
+import started from "electron-squirrel-startup";
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+if (started) {
+  app.quit();
+}
+
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
+declare const MAIN_WINDOW_VITE_NAME: string;
+
+const createWindow = () => {
+  // Create the browser window.
+  const mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+    },
+  });
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+  });
+
+  mainWindow.maximize();
+
+  // and load the index.html of the app.
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else {
+    mainWindow.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
+    );
+  }
+
+  // Open the DevTools.
+  mainWindow.webContents.openDevTools();
+};
+
+// This method will be called when Electron has finished
+// initialization and is ready to create browser windows.
+// Some APIs can only be used after this event occurs.
+app.on("ready", createWindow);
+
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+app.on("activate", () => {
+  // On OS X it's common to re-create a window in the app when the
+  // dock icon is clicked and there are no other windows open.
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+</file>
+
+<file path="src/preload.ts">
+// src/preload.ts
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('api', {
+  getStudents: () => ipcRenderer.invoke('get-students'),
+  addStudent: (data: { name: string; score: number }) => ipcRenderer.invoke('add-student', data),
+});
+</file>
+
+<file path="src/renderer.tsx">
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import './index.css';
+import App from './App';
+
+const root = createRoot(document.getElementById('root')!);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+</file>
+
+<file path="tailwind.config.js">
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM"],
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}
+</file>
+
+<file path="vite.main.config.ts">
+import { defineConfig } from "vite";
+
+export default defineConfig({
+  build: {
+    lib: {
+      entry: "src/main.ts",
+      formats: ["cjs"],
+    },
+    rollupOptions: {
+      external: ["electron"],
+    },
+  },
+});
+</file>
+
+<file path="vite.main.config.ts.timestamp-1766583945942-7a3dd1c3001fb.mjs">
+// vite.main.config.ts
+import { defineConfig } from "file:///C:/Users/USER/Desktop/result-mgt-system/node_modules/vite/dist/node/index.js";
+var vite_main_config_default = defineConfig({});
+export {
+  vite_main_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5tYWluLmNvbmZpZy50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsiY29uc3QgX192aXRlX2luamVjdGVkX29yaWdpbmFsX2Rpcm5hbWUgPSBcIkM6XFxcXFVzZXJzXFxcXFVTRVJcXFxcRGVza3RvcFxcXFxyZXN1bHQtbWd0LXN5c3RlbVwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiQzpcXFxcVXNlcnNcXFxcVVNFUlxcXFxEZXNrdG9wXFxcXHJlc3VsdC1tZ3Qtc3lzdGVtXFxcXHZpdGUubWFpbi5jb25maWcudHNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0M6L1VzZXJzL1VTRVIvRGVza3RvcC9yZXN1bHQtbWd0LXN5c3RlbS92aXRlLm1haW4uY29uZmlnLnRzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSc7XG5cbi8vIGh0dHBzOi8vdml0ZWpzLmRldi9jb25maWdcbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7fSk7XG4iXSwKICAibWFwcGluZ3MiOiAiO0FBQTJULFNBQVMsb0JBQW9CO0FBR3hWLElBQU8sMkJBQVEsYUFBYSxDQUFDLENBQUM7IiwKICAibmFtZXMiOiBbXQp9Cg==
+</file>
+
+<file path="vite.main.config.ts.timestamp-1766585091920-c2bcd4af97a2a.mjs">
+
+</file>
+
+<file path="vite.main.config.ts.timestamp-1766585486022-c5e7f1170a109.mjs">
+// vite.main.config.ts
+import { defineConfig } from "file:///C:/Users/USER/Desktop/result-mgt-system/node_modules/vite/dist/node/index.js";
+var vite_main_config_default = defineConfig({
+  build: {
+    outDir: ".vite/build",
+    rollupOptions: {
+      external: ["electron"]
+    }
+  }
+});
+export {
+  vite_main_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5tYWluLmNvbmZpZy50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsiY29uc3QgX192aXRlX2luamVjdGVkX29yaWdpbmFsX2Rpcm5hbWUgPSBcIkM6XFxcXFVzZXJzXFxcXFVTRVJcXFxcRGVza3RvcFxcXFxyZXN1bHQtbWd0LXN5c3RlbVwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiQzpcXFxcVXNlcnNcXFxcVVNFUlxcXFxEZXNrdG9wXFxcXHJlc3VsdC1tZ3Qtc3lzdGVtXFxcXHZpdGUubWFpbi5jb25maWcudHNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0M6L1VzZXJzL1VTRVIvRGVza3RvcC9yZXN1bHQtbWd0LXN5c3RlbS92aXRlLm1haW4uY29uZmlnLnRzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSc7XG5cbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7XG4gIGJ1aWxkOiB7XG4gICAgb3V0RGlyOiAnLnZpdGUvYnVpbGQnLFxuICAgIHJvbGx1cE9wdGlvbnM6IHtcbiAgICAgIGV4dGVybmFsOiBbJ2VsZWN0cm9uJ10sXG4gICAgfSxcbiAgfSxcbn0pOyJdLAogICJtYXBwaW5ncyI6ICI7QUFBMlQsU0FBUyxvQkFBb0I7QUFFeFYsSUFBTywyQkFBUSxhQUFhO0FBQUEsRUFDMUIsT0FBTztBQUFBLElBQ0wsUUFBUTtBQUFBLElBQ1IsZUFBZTtBQUFBLE1BQ2IsVUFBVSxDQUFDLFVBQVU7QUFBQSxJQUN2QjtBQUFBLEVBQ0Y7QUFDRixDQUFDOyIsCiAgIm5hbWVzIjogW10KfQo=
+</file>
+
+<file path="vite.main.config.ts.timestamp-1766585612035-3245796d8002f.mjs">
+// vite.main.config.ts
+import { defineConfig } from "file:///C:/Users/USER/Desktop/result-mgt-system/node_modules/vite/dist/node/index.js";
+var vite_main_config_default = defineConfig({
+  build: {
+    outDir: ".vite/build",
+    rollupOptions: {
+      external: ["electron"]
+    }
+  }
+});
+export {
+  vite_main_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5tYWluLmNvbmZpZy50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsiY29uc3QgX192aXRlX2luamVjdGVkX29yaWdpbmFsX2Rpcm5hbWUgPSBcIkM6XFxcXFVzZXJzXFxcXFVTRVJcXFxcRGVza3RvcFxcXFxyZXN1bHQtbWd0LXN5c3RlbVwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiQzpcXFxcVXNlcnNcXFxcVVNFUlxcXFxEZXNrdG9wXFxcXHJlc3VsdC1tZ3Qtc3lzdGVtXFxcXHZpdGUubWFpbi5jb25maWcudHNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0M6L1VzZXJzL1VTRVIvRGVza3RvcC9yZXN1bHQtbWd0LXN5c3RlbS92aXRlLm1haW4uY29uZmlnLnRzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSc7XG5cbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7XG4gIGJ1aWxkOiB7XG4gICAgb3V0RGlyOiAnLnZpdGUvYnVpbGQnLFxuICAgIHJvbGx1cE9wdGlvbnM6IHtcbiAgICAgIGV4dGVybmFsOiBbJ2VsZWN0cm9uJ10sXG4gICAgfSxcbiAgfSxcbn0pOyJdLAogICJtYXBwaW5ncyI6ICI7QUFBMlQsU0FBUyxvQkFBb0I7QUFFeFYsSUFBTywyQkFBUSxhQUFhO0FBQUEsRUFDMUIsT0FBTztBQUFBLElBQ0wsUUFBUTtBQUFBLElBQ1IsZUFBZTtBQUFBLE1BQ2IsVUFBVSxDQUFDLFVBQVU7QUFBQSxJQUN2QjtBQUFBLEVBQ0Y7QUFDRixDQUFDOyIsCiAgIm5hbWVzIjogW10KfQo=
+</file>
+
+<file path="vite.preload.config.ts">
+import { defineConfig } from "vite";
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// https://vitejs.dev/config
+export default defineConfig({
+  build: {
+    sourcemap: true,
+    outDir: ".vite/build",
+    lib: {
+      entry: resolve(__dirname, "src/preload.ts"),
+      formats: ["cjs"],
+      fileName: () => "[name].js",
+    },
+    rollupOptions: {
+      external: ["electron"],
+    },
+  },
+});
+</file>
+
+<file path="vite.preload.config.ts.timestamp-1766583945968-b289c9c6f54e3.mjs">
+// vite.preload.config.ts
+import { defineConfig } from "file:///C:/Users/USER/Desktop/result-mgt-system/node_modules/vite/dist/node/index.js";
+var vite_preload_config_default = defineConfig({});
+export {
+  vite_preload_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5wcmVsb2FkLmNvbmZpZy50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsiY29uc3QgX192aXRlX2luamVjdGVkX29yaWdpbmFsX2Rpcm5hbWUgPSBcIkM6XFxcXFVzZXJzXFxcXFVTRVJcXFxcRGVza3RvcFxcXFxyZXN1bHQtbWd0LXN5c3RlbVwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiQzpcXFxcVXNlcnNcXFxcVVNFUlxcXFxEZXNrdG9wXFxcXHJlc3VsdC1tZ3Qtc3lzdGVtXFxcXHZpdGUucHJlbG9hZC5jb25maWcudHNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0M6L1VzZXJzL1VTRVIvRGVza3RvcC9yZXN1bHQtbWd0LXN5c3RlbS92aXRlLnByZWxvYWQuY29uZmlnLnRzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSc7XG5cbi8vIGh0dHBzOi8vdml0ZWpzLmRldi9jb25maWdcbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7fSk7XG4iXSwKICAibWFwcGluZ3MiOiAiO0FBQWlVLFNBQVMsb0JBQW9CO0FBRzlWLElBQU8sOEJBQVEsYUFBYSxDQUFDLENBQUM7IiwKICAibmFtZXMiOiBbXQp9Cg==
+</file>
+
+<file path="vite.preload.config.ts.timestamp-1766585486025-8b159be5f3602.mjs">
+// vite.preload.config.ts
+import { defineConfig } from "file:///C:/Users/USER/Desktop/result-mgt-system/node_modules/vite/dist/node/index.js";
+var vite_preload_config_default = defineConfig({
+  build: {
+    outDir: ".vite/build"
+  }
+});
+export {
+  vite_preload_config_default as default
+};
+//# sourceMappingURL=data:application/json;base64,ewogICJ2ZXJzaW9uIjogMywKICAic291cmNlcyI6IFsidml0ZS5wcmVsb2FkLmNvbmZpZy50cyJdLAogICJzb3VyY2VzQ29udGVudCI6IFsiY29uc3QgX192aXRlX2luamVjdGVkX29yaWdpbmFsX2Rpcm5hbWUgPSBcIkM6XFxcXFVzZXJzXFxcXFVTRVJcXFxcRGVza3RvcFxcXFxyZXN1bHQtbWd0LXN5c3RlbVwiO2NvbnN0IF9fdml0ZV9pbmplY3RlZF9vcmlnaW5hbF9maWxlbmFtZSA9IFwiQzpcXFxcVXNlcnNcXFxcVVNFUlxcXFxEZXNrdG9wXFxcXHJlc3VsdC1tZ3Qtc3lzdGVtXFxcXHZpdGUucHJlbG9hZC5jb25maWcudHNcIjtjb25zdCBfX3ZpdGVfaW5qZWN0ZWRfb3JpZ2luYWxfaW1wb3J0X21ldGFfdXJsID0gXCJmaWxlOi8vL0M6L1VzZXJzL1VTRVIvRGVza3RvcC9yZXN1bHQtbWd0LXN5c3RlbS92aXRlLnByZWxvYWQuY29uZmlnLnRzXCI7aW1wb3J0IHsgZGVmaW5lQ29uZmlnIH0gZnJvbSAndml0ZSc7XG5cbmV4cG9ydCBkZWZhdWx0IGRlZmluZUNvbmZpZyh7XG4gIGJ1aWxkOiB7XG4gICAgb3V0RGlyOiAnLnZpdGUvYnVpbGQnLFxuICB9LFxufSk7Il0sCiAgIm1hcHBpbmdzIjogIjtBQUFpVSxTQUFTLG9CQUFvQjtBQUU5VixJQUFPLDhCQUFRLGFBQWE7QUFBQSxFQUMxQixPQUFPO0FBQUEsSUFDTCxRQUFRO0FBQUEsRUFDVjtBQUNGLENBQUM7IiwKICAibmFtZXMiOiBbXQp9Cg==
+</file>
+
+<file path="vite.renderer.config.ts">
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "url";
+import { dirname, resolve } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// https://vitejs.dev/config
+export default defineConfig({
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": resolve(__dirname, "./src"),
+    },
+  },
+  build: {
+    outDir: ".vite/renderer/main_window",
+    rollupOptions: {
+      external: ["better-sqlite3"],
+      input: {
+        main_window: resolve(__dirname, "index.html"),
+      },
+    },
+  },
+  server: {
+    port: 5173,
+  },
+});
+</file>
+
+</files>
